@@ -1,7 +1,12 @@
-#from gestion_super_admin.super_admin import acceder_funciones_super_admin
+import sqlite3
 
-#acceder_funciones_super_admin()
+def mostrar_datos():
+    conexion = sqlite3.connect('gestion_usuarios/usuarios.db')
+    cursor = conexion.cursor()
+    cursor.execute("SELECT id, nombre_usuario, apellido_usuario, numero_usuario FROM usuarios")
+    usuarios = cursor.fetchall()
+    for usuario in usuarios:
+        print(usuario)
+    conexion.close()
 
-from gestion_sesion.estado_sesion import actualizar_estado_sesion
-
-actualizar_estado_sesion()
+mostrar_datos()

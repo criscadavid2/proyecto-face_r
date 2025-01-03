@@ -7,9 +7,8 @@ import sqlite3
 def obtener_rol_usuario(usuario_id):
     """Obtiene el rol del usuario según su ID."""
     query = """
-        SELECT roles.nombre
+        SELECT rol_id
         FROM usuarios
-        JOIN roles ON usuarios.rol_id = roles.id
         WHERE usuarios.id = ?
     """
     resultado = ejecutar_consulta_usuarios(query, (usuario_id,))
@@ -37,9 +36,10 @@ def es_administrador(usuario_id):
             FROM usuarios
             JOIN roles ON usuarios.rol_id = roles.id
             WHERE usuarios.id = ?
-        resultado = cursor.fetchone()
         """, (usuario_id,))
         resultado = cursor.fetchone()
+
+        print(f"[Debug] Resultado de la consulta: {resultado}")
 
         # Verificar Si el rol es  "Administrador"
         return resultado and resultado[0] == 'Administrador'

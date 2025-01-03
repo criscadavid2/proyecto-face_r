@@ -6,7 +6,6 @@ from gestion_rostros.registros import registrar_rostro
 from gestion_super_admin.super_admin import acceder_funciones_super_admin
 from gestion_camaras.camaras import inicializar_camaras, verificar_camara_predeterminada, abrir_configuracion, probar_camara, nombres_camaras
 from gestion_sesion.estado_sesion import actualizar_estado_sesion
-from utils import mostrar_login, cerrar_sesion
 from gestion_asistencia.asistencia import ver_asistencia
 from gestion_interfaz.interfaz import crear_interfaz_principal
 import config

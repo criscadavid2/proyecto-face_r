@@ -65,26 +65,14 @@ def ejecutar_consulta_asistencia(query, parametros=()):
 
 
 
-def verificar_login(numero_usuario, contrasena_usuario, actualizar_estado_sesion_callback, acceder_funciones_super_admin,ventana_principal, login_ventana):
+def verificar_login(usuario_id, contrasena_usuario, actualizar_estado_sesion_callback, acceder_funciones_super_admin,ventana_principal, login_ventana):
     config.usuario_logueado_id, config.usuario_logueado_nombre
-    """Verifica las credenciales de un usuario y actualiza el estado de sesión.
+    """Verifica las credenciales de un usuario y actualiza el estado de sesión."""
 
-    Args:
-        numero_usuario (str): Número de usuario ingresado.
-        contrasena_usuario (str): Contraseña ingresada.
-        actualizar_estado_sesion_callback (function): Función para actualizar el estado de la sesión.
-        ventana_principal (tk.Tk): Ventana principal de la aplicación.
-        login_ventana (tk.Toplevel): Ventana de login.
-
-    Returns:
-        bool: True si el login es exitoso, False en caso contrario."""
-    
-    
-
-    print(f"[Debug] Verificando credenciales: {numero_usuario}, {contrasena_usuario}")
+    print(f"[Debug] Verificando credenciales: {usuario_id}, {contrasena_usuario}")
 
     # Verificar las credenciales del super administrador
-    if numero_usuario == SUPER_ADMIN_USUARIO and contrasena_usuario == SUPER_ADMIN_CONTRASENA:
+    if usuario_id == SUPER_ADMIN_USUARIO and contrasena_usuario == SUPER_ADMIN_CONTRASENA:
         print("[Debug] Credenciales de Super Admin correctas")
         config.usuario_logueado_id = "Super Admin"
         config.usuario_logueado_nombre = "Super Admin"
@@ -101,24 +89,34 @@ def verificar_login(numero_usuario, contrasena_usuario, actualizar_estado_sesion
     # Verificar credenciales en la base de datos
     conexion, cursor = conectar_bd_usuarios()  # Conectamos la BD
     if conexion is None:
-        return  # Si no conecta la bd salimos de la función
+        return False # Si no conecta la bd salimos de la función
 
     try:
         # Buscar al usuario en la base de datos
-        query = "SELECT id, nombre, contrasena FROM usuarios WHERE numero_usuario = ?"
-        cursor.execute(query, (numero_usuario,))
+        query = "SELECT id, nombre_usuario, contrasena_usuario FROM usuarios WHERE id = ?"
+        cursor.execute(query, (usuario_id,))
         usuario = cursor.fetchone()
-        if usuario and bcrypt.checkpw(contrasena_usuario.encode('utf-8'), usuario[2]):
-            config.usuario_logueado_id = usuario[0]
-            config.usuario_logueado_nombre = usuario[1]
+        print("[Debug] Usuario obtenido de la bd:", usuario)
+
+        if usuario:
+            print(f"[Debug] Verificando contraseña para el usuario: {usuario[0]}") 
+            if bcrypt.checkpw(contrasena_usuario.encode('utf-8'), usuario[2]):
+                config.usuario_logueado_id = usuario[0]
+                config.usuario_logueado_nombre = usuario[1]
             
-            actualizar_estado_sesion_callback(config.usuario_logueado_id, config.usuario_logueado_nombre)
-            print(f"[Debug] Inicio de sesión exitoso: {config.usuario_logueado_id}, {config.usuario_logueado_nombre}")
-            login_ventana.destroy()
-            return True #Retornar True si el login es exitoso
+                actualizar_estado_sesion_callback(config.usuario_logueado_id, config.usuario_logueado_nombre)
+                print(f"[Debug] Inicio de sesión exitoso: {config.usuario_logueado_id}, {config.usuario_logueado_nombre}")
+                login_ventana.destroy()
+                return True #Retornar True si el login es exitoso
+            else:
+                print("[Debug] Contraseña incorrecta")
+                messagebox.showerror("Error de inicio de sesión", "Número de usuario o contraseña incorrectos.")
+                return False #Retornar False en caso de credenciales incorrectas
         else:
-            messagebox.showerror("Error de inicio de sesión", "Número de usuario o contraseña incorrectos.")
-            return False #Retornar False en caso de credenciales incorrectas
+            print("[Debug] Usuario no encontrado en la base de datos")
+            messagebox.showerror("Error de inicio de sesión", "Número de usuario o contraseña incorrectos.")    
+        
+        return False #Retornar False en caso de usuario no encontrado   
     except sqlite3.Error as e:
         messagebox.showerror("Error de base de datos", f"Error en la consulta: {e}")
         return False #Retornar False en caso de error de base de datos

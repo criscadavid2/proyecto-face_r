@@ -5,8 +5,13 @@ import re  # Validación de correo electrónico
 from utils import conectar_bd_usuarios
 import datetime
 import sqlite3
+from utils import conectar_bd_usuarios, ejecutar_consulta_usuarios
 
 #Validaiones para el registro de usuarios
+def validar_correo(correo):
+    """Función simple para validar formato de correo."""
+    return "@" in correo and "." in correo
+
 def validar_usuario(cedula):
     # Validar que la cédula sea solo números
     return cedula.isdigit()
@@ -15,10 +20,6 @@ def validar_contrasena(contrasena):
     """Valida que la contraseña tenga al menos 8 caracteres."""
     return len(contrasena) >= 8
 
-def validar_correo(correo):
-    """Valida el formato del correo electrónico."""
-    patron = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
-    return re.match(patron, correo) is not None
 
 #---------------------------------
 
@@ -109,6 +110,7 @@ def registrar_nuevo_usuario(ventana_principal):  # Abrir ventana de registro
                 cursor.execute("SELECT MAX(numero_usuario) FROM usuarios")
                 resultado = cursor.fetchone()
                 nuevo_numero = 1 if resultado is None or resultado[0] is None else resultado[0] + 1
+                print(f"[Debug] Nuevo número de usuario: {nuevo_numero}")
             except sqlite3.Error as e:
                 messagebox.showerror("Error al consultar la base de datos", f"Error: {e}")
                 return
@@ -140,22 +142,23 @@ def registrar_nuevo_usuario(ventana_principal):  # Abrir ventana de registro
 
             # Insertar nuevo usuario en la base de datos            
 
-            cursor.execute(
-                """
+            cursor.execute("""
                 INSERT INTO usuarios (
-                id,
-                nombre_usuario,
-                apellido_usuario,
-                contrasena_usuario,
-                correo_usuario,
-                rol_id,
-                grupo_usuario,
-                numero_usuario,
-                fecha_registro)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, 
+                    id,
+                    nombre_usuario,
+                    apellido_usuario,
+                    contrasena_usuario,
+                    correo_usuario,
+                    rol_id,
+                    fecha_registro,
+                    grupo_usuario,
+                    numero_usuario,
+                    ultimo_acceso,
+                    codificacion_rostro)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,  
             (
-                id_usuario, nombre, apellidos, hashed_password, correo, rol_id, grupo if rol == "Estudiante" else None, nuevo_numero, fecha_registro)
+                id_usuario, nombre, apellidos, hashed_password, correo, rol_id, fecha_registro, grupo if rol == "Estudiante" else None, nuevo_numero, None ,None)
             )
             conexion.commit()
             messagebox.showinfo("Éxito", "Usuario registrado correctamente.")
