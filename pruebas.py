@@ -1,0 +1,7 @@
+#from gestion_super_admin.super_admin import acceder_funciones_super_admin
+
+#acceder_funciones_super_admin()
+
+from gestion_sesion.estado_sesion import actualizar_estado_sesion
+
+actualizar_estado_sesion()
