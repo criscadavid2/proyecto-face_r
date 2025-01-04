@@ -7,6 +7,7 @@ from reconocimiento import iniciar_hilo_reconocimiento, detener_reconocimiento
 from utils import mostrar_login
 from gestion_sesion.sesion import abrir_ventana_registro
 import config
+from gestion_usuarios.usuarios import registrar_nuevo_usuario
 
 
 def configurar_estilo():
@@ -33,13 +34,16 @@ def crear_botones_sesion(ventana_principal, actualizar_estado_sesion_callback, a
             mostrar_login(
             ventana_principal,
             actualizar_estado_sesion_callback,
-            acceder_funciones_super_admin) 
+            acceder_funciones_super_admin
+            ) 
         )
     )
     
     login_logout_btn.pack(side="top", anchor="e", padx=(0, 20), pady=10)
 
     return estado_label, boton_perfil, login_logout_btn
+
+
 
 def agregar_pestanas(notebook, opcion_camara, ventana_principal):
     """"Crear y organiza las pestañas principales de la interfaz."""
@@ -81,6 +85,17 @@ def agregar_pestanas(notebook, opcion_camara, ventana_principal):
             
     ).grid(row=1, column=0, padx=20, pady=10)
     
+    #Pestaña de usuarios
+    frame_usuarios = ttk.Frame(notebook)
+    notebook.add(frame_usuarios, text="Usuarios")
+
+    ttk.Button(
+        frame_usuarios,
+        text="ver usuarios",
+        command=lambda: registrar_nuevo_usuario(ventana_principal)
+    ).grid(row=0, column=0, padx=20, pady=10)
+
+
     #Pestaña de configuración
     frame_configuracion = ttk.Frame(notebook)
     notebook.add(frame_configuracion, text="Configuración")
