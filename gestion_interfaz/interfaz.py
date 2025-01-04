@@ -66,7 +66,7 @@ def agregar_pestanas(notebook, opcion_camara, ventana_principal):
     ttk.Button(
         frame_registro,
         text="Registrar Nuevo Rostro",
-        command=lambda: registrar_rostro(int(opcion_camara.get().split()[-1]))
+        command=lambda: registrar_rostro(ventana_principal, opcion_camara)
     ).grid(row=0, column=0, padx=20, pady=10)
 
     ttk.Button(
