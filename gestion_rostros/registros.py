@@ -1,209 +1,219 @@
 import cv2
 import face_recognition
-import pickle
 import os
+import threading
 from datetime import datetime
 import tkinter as tk
-from tkinter import simpledialog, messagebox, Toplevel, Button, Canvas
-from utils import conectar_bd_usuarios, ejecutar_consulta_usuarios, cargar_rostros_conocidos
+from tkinter import Toplevel, Button, Canvas, Label
 from PIL import Image, ImageTk
+import time
+from utils import guardar_codificacion_rostro
 import config
-import gestion_camaras.camaras as camaras
 
-# Función para actualizar el frame en el canvas con reconocimiento facial
-def actualizar_frame_con_reconocimiento(canvas, ventana):
-    ret, frame = config.captura.read()
-    if ret:
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+TIEMPO_ESPERA = 6  # Tiempo total de cuenta regresiva (segundos)
 
-        #Realizar el reconocimiento facial
-        ubicaciones_rostros = face_recognition.face_locations(frame_rgb)
-        codificaciones_rostros = face_recognition.face_encodings(frame_rgb, ubicaciones_rostros)
 
-        for (top, right, bottom, left), codificacion in zip(ubicaciones_rostros, codificaciones_rostros):
-            coincidencias = face_recognition.compare_faces(config.codificaciones_conocidas, codificacion)
-            distancias = face_recognition.face_distance(config.codificaciones_conocidas, codificacion)
-            mejor_match = None
+# Clase para reproducir el sonido en un hilo separado
+class AudioThread(threading.Thread):
+    def __init__(self, ruta_audio):
+        super().__init__()
+        self.ruta_audio = ruta_audio
+        self.finalizado = threading.Event()
 
-            if coincidencias:
-                mejor_match = min(range(len(distancias)), key=distancias.__getitem__)
-            
-            if mejor_match is not None and coincidencias[mejor_match]:
-                id_usuario = config.ids_conocidos_conocidos[mejor_match]
+    def run(self):
+        try:
+            import simpleaudio as sa
+            wave_obj = sa.WaveObject.from_wave_file(self.ruta_audio)
+            play_obj = wave_obj.play()
+            play_obj.wait_done()
+        except Exception as e:
+            print(f"[Debug] Error al reproducir el sonido: {e}")
+        finally:
+            self.finalizado.set()  # Marcar que el audio ha terminado
 
-                #Consultar información adicional del estudiante
-                consulta_estudiante = """
-                    SELECT nombre_usuario, apellido_usuario, grupo_usuario
-                    FROM usuarios
-                    WHERE id = ? AND rol_id = '3'
-                """ #Suponiendo que el rol_id 3 corresponde a estudiantes
-                resultados = ejecutar_consulta_usuarios(consulta_estudiante, (id_usuario,))
 
-                if resultados:
-                    nombre_usuario, apellido_usuario, grupo = resultados[0]
-                    etiqueta = f"{id_usuario} {nombre_usuario} {apellido_usuario} ({grupo})"
-                else:
-                    #Si no es estudiante, consultar nombre y apellido
-                    consulta_general = """
-                    SELECT nombre_usuario, apellido_usuario
-                    FROM usuarios
-                    WHERE id = ?
-                """
-                resultados_general = ejecutar_consulta_usuarios(consulta_general, (id_usuario,))
+# Clase para manejar la cámara
+class Camara:
+    def __init__(self, indice_camara):
+        self.captura = None
+        self.iniciar(indice_camara)
 
-                if resultados_general:
-                    nombre_usuario, apellido_usuario = resultados_general[0]
-                    etiqueta = f"{id_usuario} {nombre_usuario} {apellido_usuario} - No es estudiante"
-                else:
-                    etiqueta = f"i{id_usuario} - Información no encontrada"
-            else:
-                etiqueta = "Desconocido" 
+    def iniciar(self, indice_camara):
+        try:
+            self.captura = cv2.VideoCapture(indice_camara)
+            if not self.captura.isOpened():
+                raise RuntimeError("No se pudo acceder a la cámara.")
+        except Exception as e:
+            print(f"[Debug] Error al iniciar la cámara: {e}")
+            self.captura = None
 
-            # Dibujar rectángulo y nombre
-            cv2.rectangle(frame_rgb, (left, top), (right, bottom), (0, 255, 0), 2)
-            cv2.putText(frame_rgb, etiqueta, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+    def detener(self):
+        try:
+            if self.captura is not None:
+                self.captura.release()
+                print("[Debug] Cámara liberada correctamente.")
+            self.captura = None
+        except Exception as e:
+            print(f"[Debug] Error al liberar la cámara: {e}")
 
-        # Mostrar frame en el canvas
-        imagen = Image.fromarray(frame_rgb)
-        config.imagen_tk = ImageTk.PhotoImage(image=imagen)
-        canvas.create_image(0, 0, anchor=tk.NW, image=config.imagen_tk)
 
-        ventana.after(10, lambda: actualizar_frame_con_reconocimiento(canvas, ventana))
-        
+# Función para capturar fotos con el flujo completo
+def capturar_fotos(id_usuario, ruta_carpeta_usuario, posiciones, etiqueta_posicion, etiqueta_conteo, ventana_principal, callback):
+    fotos_tomadas = []
+    codificaciones = []
+    contador_posicion = 0
+    contador_segundos = TIEMPO_ESPERA  # Contador para los segundos de espera
 
-# Función para manejar la ventana de la cámara
-def iniciar_camara(indice_camara, ventana):
-    captura = cv2.VideoCapture(indice_camara)
-    if not captura.isOpened():
-        messagebox.showerror("Error", "No se pudo acceder a la cámara.")
-        ventana.destroy()
-        return None
-    return captura
+    def capturar_foto():
+        nonlocal contador_posicion, contador_segundos
 
-# Función para cerrar la cámara y liberar recursos
-def cerrar_camara(captura, ventana):
-    if captura is not None:
-        captura.release()
-    cv2.destroyAllWindows()
-    ventana.destroy()
-
-# Función para guardar una nueva codificación en la base de datos
-def guardar_codificacion_rostro(id_usuario, codificacion):
-    try:
-        conexion, cursor = conectar_bd_usuarios()
-        if conexion is None:
+        if contador_posicion >= len(posiciones):
+            etiqueta_posicion.config(text="Captura de fotos completada.", fg="green")
+            etiqueta_conteo.config(text="")
+            callback(fotos_tomadas, codificaciones)  # Llamar al callback cuando se completen todas las fotos
             return
 
-        codificacion_serializada = pickle.dumps(codificacion)
+        # Mostrar posición actual
+        posicion = posiciones[contador_posicion]
+        etiqueta_posicion.config(text=f"Coloque su rostro en la posición: {posicion}", fg="blue")
+        ventana_principal.update_idletasks()
 
-        consulta = '''
-            UPDATE usuarios
-            SET codificacion_rostro = ?
-            WHERE id = ?
-        '''
-        cursor.execute(consulta, (codificacion_serializada, id_usuario))
-        conexion.commit()
-        conexion.close()
-
-        print(f"Codificación del rostro para el usuario {id_usuario} guardada exitosamente.")
-    except Exception as e:
-        print(f"Error al guardar las codificaciones: {e}")
-
-# Función principal para registrar un nuevo rostro
-def registrar_rostro(ventana_principal, opcion_camara):
-    ventana_rostro = Toplevel(ventana_principal)
-    ventana_rostro.title("Registrar Rostro")
-    ventana_rostro.geometry("800x600")
-
-    indice_camara = int(opcion_camara.get().split()[-1])
-    config.captura = iniciar_camara(indice_camara, ventana_rostro)
-    if config.captura is None:
-        return
-
-    canvas = Canvas(ventana_rostro, width=640, height=480)
-    canvas.pack()
-
-    actualizar_frame_con_reconocimiento(canvas, ventana_rostro)
-
-    def capturar():
-        ret, frame = config.captura.read()
-        if not ret:
-            messagebox.showerror("Error", "No se pudo acceder a la cámara.")
-            return
-
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        ubicaciones_rostros = face_recognition.face_locations(frame_rgb)
-        codificaciones_rostros = face_recognition.face_encodings(frame_rgb, ubicaciones_rostros)
-
-        if len(ubicaciones_rostros) == 0:
-            messagebox.showwarning("Advertencia", "No se detectó ningún rostro. Intenta de nuevo.")
-            return
-
-        if len(ubicaciones_rostros) > 1:
-            messagebox.showerror("Advertencia", "Se detectaron múltiples rostros. Por favor, asegúrate de que solo haya una persona visible.")
-            return
-
-        # Tomar la primera codificación (debe haber solo un rostro en este punto)
-        codificacion = codificaciones_rostros[0]
-        id_usuario = simpledialog.askstring("ID Único", "Ingrese el ID del usuario registrado:")
-
-        if id_usuario:
-            consulta = "SELECT id FROM usuarios WHERE id = ?"
-            resultados = ejecutar_consulta_usuarios(consulta, (id_usuario,))
-
-            if resultados:
-                guardar_codificacion_rostro(id_usuario, codificacion)
-                messagebox.showinfo("Éxito", f"Rostro del usuario {id_usuario} registrado con éxito.")
-            else:
-                messagebox.showerror("Error", f"No se encontró un usuario con ID {id_usuario}.")
-
-    def seleccionar_camara():
-        camaras.abrir_configuracion(ventana_rostro, opcion_camara)
-
-    botones_frame = tk.Frame(ventana_rostro)
-    botones_frame.pack(side=tk.BOTTOM, pady=10)
-
-    btn_capturar = Button(botones_frame, text="Capturar", command=capturar)
-    btn_capturar.pack(side=tk.LEFT, padx=10)
-
-    btn_camara = Button(botones_frame, text="Seleccionar Cámara", command=seleccionar_camara)
-    btn_camara.pack(side=tk.LEFT, padx=10)
-
-    btn_salir = Button(botones_frame, text="Salir", command=lambda: cerrar_camara(config.captura, ventana_rostro))
-    btn_salir.pack(side=tk.LEFT, padx=10)
-
-# Función para eliminar un rostro existente
-def eliminar_rostro():
-    id_a_eliminar = simpledialog.askstring("Eliminar Rostro", "Ingresa el ID único del rostro a eliminar:")
-
-    if not id_a_eliminar:
-        messagebox.showwarning("Cancelado", "La eliminación fue cancelada.")
-        return
-
-    try:
-        conexion, cursor = conectar_bd_usuarios()
-        if conexion is None:
-            return
-
-        consulta = "SELECT codificacion_rostro FROM usuarios WHERE id = ?"
-        cursor.execute(consulta, (id_a_eliminar,))
-        resultado = cursor.fetchone()
-
-        if resultado and resultado[0] is not None:
-            consulta_update = """
-                UPDATE usuarios
-                SET codificacion_rostro = NULL
-                WHERE id = ?
-            """
-            cursor.execute(consulta_update, (id_a_eliminar,))
-            conexion.commit()
-            messagebox.showinfo("Éxito", f"El rostro del usuario {id_a_eliminar} fue eliminado correctamente.")
+        # Actualizar el conteo regresivo
+        etiqueta_conteo.config(text=f"Tiempo restante: {contador_segundos} segundos", fg="orange")
+        if contador_segundos > 0:
+            contador_segundos -= 1
+            ventana_principal.after(1000, capturar_foto)
         else:
-            messagebox.showerror("Error", f"No se encontró un rostro registrado para el usuario {id_a_eliminar}.")
+            # Capturar la foto
+            ret, frame = config.captura.read()
+            if not ret:
+                etiqueta_posicion.config(text="Error: No se pudo leer el frame de la cámara", fg='red')
+                ventana_principal.after(1000, capturar_foto)  # Reintentar la captura
+                return
 
-        conexion.close()
-    except Exception as e:
-        print(f"Error al eliminar el rostro: {e}")
+            # Procesar el frame y verificar rostros
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            ubicaciones_rostros = face_recognition.face_locations(frame_rgb)
 
-# Cargar codificaciones al inicio
-config.codificaciones_conocidas, config.ids_conocidos_conocidos = cargar_rostros_conocidos()
+            if len(ubicaciones_rostros) != 1:
+                etiqueta_posicion.config(text="Error: Debe haber exactamente un rostro visible", fg='red')
+                ventana_principal.after(2000, capturar_foto)
+                return
+
+            # Guardar la imagen
+            fecha_hora_actual = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            nombre_archivo = f"{id_usuario}_{fecha_hora_actual}_{posicion}.jpg"
+            ruta_archivo = os.path.join(ruta_carpeta_usuario, nombre_archivo)
+
+            try:
+                cv2.imwrite(ruta_archivo, frame)
+                fotos_tomadas.append(ruta_archivo)
+
+                # Codificar el rostro
+                codificacion = face_recognition.face_encodings(frame_rgb, ubicaciones_rostros)[0]
+                codificaciones.append(codificacion)
+
+                etiqueta_posicion.config(text=f"Foto {posicion} guardada exitosamente", fg="green")
+                contador_posicion += 1  # Pasar a la siguiente posición
+                contador_segundos = TIEMPO_ESPERA
+                ventana_principal.after(2000, capturar_foto)
+            except Exception as e:
+                etiqueta_posicion.config(text=f"Error: no se pudo guardar la foto: {e}", fg='red')
+                ventana_principal.after(2000, capturar_foto)
+
+    capturar_foto()
+
+
+# Función para capturar foto con lentes con conteo regresivo
+def capturar_foto_con_lentes(id_usuario, ruta_carpeta_usuario, etiqueta_posicion, etiqueta_conteo, ventana_principal, callback):
+    etiqueta_posicion.config(text="Coloque sus lentes y mire a la cámara", fg="blue")
+    ventana_principal.update_idletasks()
+
+    contador_segundos = TIEMPO_ESPERA  # Contador de 6 segundos
+
+    def realizar_conteo():
+        nonlocal contador_segundos
+
+        if contador_segundos > 0:
+            etiqueta_conteo.config(text=f"Tiempo restante: {contador_segundos} segundos", fg="orange")
+            contador_segundos -= 1
+            ventana_principal.after(1000, realizar_conteo)
+        else:
+            # Capturar la foto
+            ret, frame = config.captura.read()
+            if not ret:
+                etiqueta_posicion.config(text="Error: No se pudo leer el frame de la cámara", fg='red')
+                return
+
+            # Verificar rostro
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            ubicaciones_rostros = face_recognition.face_locations(frame_rgb)
+
+            if len(ubicaciones_rostros) != 1:
+                etiqueta_posicion.config(text="Error: Debe haber exactamente un rostro visible", fg='red')
+                return
+
+            # Guardar la imagen
+            fecha_hora_actual = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            nombre_archivo = f"{id_usuario}_{fecha_hora_actual}_con_lentes.jpg"
+            ruta_archivo = os.path.join(ruta_carpeta_usuario, nombre_archivo)
+
+            try:
+                cv2.imwrite(ruta_archivo, frame)
+                foto_lentes = ruta_archivo
+
+                # Codificar rostro
+                codificacion = face_recognition.face_encodings(frame_rgb, ubicaciones_rostros)[0]
+                callback(foto_lentes, [codificacion])
+            except Exception as e:
+                etiqueta_posicion.config(text=f"Error al guardar foto: {e}", fg="red")
+
+    realizar_conteo()
+
+
+# Ventana modal para preguntar si usa lentes
+def preguntar_usa_lentes(ventana_principal, id_usuario, ruta_carpeta_usuario, fotos_tomadas, codificaciones, etiqueta_posicion, etiqueta_conteo, callback_lentes, callback_no_lentes):
+    modal = Toplevel(ventana_principal)
+    modal.title("¿Usa lentes?")
+    modal.geometry("400x200")
+    modal.grab_set()
+
+    Label(modal, text="¿Usa lentes?", font=("Arial", 14), pady=20).pack()
+    botones_frame = tk.Frame(modal)
+    botones_frame.pack(pady=20)
+
+    Button(botones_frame, text="Sí", command=lambda: [modal.destroy(), callback_lentes(id_usuario, ruta_carpeta_usuario, fotos_tomadas, codificaciones, etiqueta_posicion, etiqueta_conteo)], width=10, bg="green", fg="white").pack(side=tk.LEFT, padx=5)
+    Button(botones_frame, text="No", command=lambda: [modal.destroy(), callback_no_lentes(fotos_tomadas, codificaciones, etiqueta_posicion)], width=10, bg="red", fg="white").pack(side=tk.RIGHT, padx=5)
+
+
+# Función principal para capturar fotos
+def capturar(id_usuario, ruta_carpeta_usuario, etiqueta_posicion, etiqueta_conteo, ventana_principal):
+    posiciones = ["frontal", "lateral izquierdo", "lateral derecho", "mirando arriba", "mirando abajo"]
+
+    def procesar_resultado(fotos_tomadas, codificaciones):
+        if not fotos_tomadas or not codificaciones:
+            etiqueta_posicion.config(text="Error: No se pudieron capturar todas las fotos.", fg="red")
+            return
+
+        preguntar_usa_lentes(ventana_principal, id_usuario, ruta_carpeta_usuario, fotos_tomadas, codificaciones, etiqueta_posicion, etiqueta_conteo, guardar_lentes_wrapper, guardar_en_bd_wrapper)
+    #Esto hay que arreglo
+    def guardar_lentes_wrapper(fotos_tomadas, codificaciones, lentes_fotos, lentes_codificaciones, etiqueta_posicion, etiqueta_conteo):
+        fotos_tomadas.extend(lentes_fotos)
+        codificaciones.extend(lentes_codificaciones)
+        guardar_en_bd(fotos_tomadas, codificaciones, etiqueta_posicion)
+
+    def guardar_en_bd_wrapper(fotos_tomadas, codificaciones, etiqueta_posicion):
+        guardar_en_bd(fotos_tomadas, codificaciones, etiqueta_posicion)
+
+    capturar_fotos(id_usuario, ruta_carpeta_usuario, posiciones, etiqueta_posicion, etiqueta_conteo, ventana_principal, procesar_resultado)
+
+
+# Guardar en la base de datos
+def guardar_en_bd(fotos_tomadas, codificaciones, etiqueta_posicion):
+    if codificaciones:
+        promedio_codificacion = [
+            sum(cod[i] for cod in codificaciones) / len(codificaciones)
+            for i in range(len(codificaciones[0]))
+        ]
+        guardar_codificacion_rostro(promedio_codificacion)
+        etiqueta_posicion.config(text="Rostro registrado exitosamente.", fg="green")
