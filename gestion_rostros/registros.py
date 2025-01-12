@@ -1,36 +1,14 @@
 import cv2
 import face_recognition
 import os
-import threading
 from datetime import datetime
 import tkinter as tk
 from tkinter import Toplevel, Button, Canvas, Label
 from PIL import Image, ImageTk
-import time
-from utils import guardar_codificacion_rostro
 import config
+from utils import guardar_codificacion_rostro
 
 TIEMPO_ESPERA = 6  # Tiempo total de cuenta regresiva (segundos)
-
-
-# Clase para reproducir el sonido en un hilo separado
-class AudioThread(threading.Thread):
-    def __init__(self, ruta_audio):
-        super().__init__()
-        self.ruta_audio = ruta_audio
-        self.finalizado = threading.Event()
-
-    def run(self):
-        try:
-            import simpleaudio as sa
-            wave_obj = sa.WaveObject.from_wave_file(self.ruta_audio)
-            play_obj = wave_obj.play()
-            play_obj.wait_done()
-        except Exception as e:
-            print(f"[Debug] Error al reproducir el sonido: {e}")
-        finally:
-            self.finalizado.set()  # Marcar que el audio ha terminado
-
 
 # Clase para manejar la cámara
 class Camara:
@@ -42,7 +20,7 @@ class Camara:
         try:
             self.captura = cv2.VideoCapture(indice_camara)
             if not self.captura.isOpened():
-                raise RuntimeError("No se pudo acceder a la cámara.")
+                raise RuntimeError(f"No se pudo acceder a la cámara en el índice {indice_camara}.")
         except Exception as e:
             print(f"[Debug] Error al iniciar la cámara: {e}")
             self.captura = None
@@ -56,159 +34,189 @@ class Camara:
         except Exception as e:
             print(f"[Debug] Error al liberar la cámara: {e}")
 
+def verificar_rostros(frame, etiqueta_posicion):
+    """Verifica la cantidad de rostros detectados en un frame y actualiza la etiqueta."""
+    try:
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        ubicaciones_rostros = face_recognition.face_locations(frame_rgb)
 
-# Función para capturar fotos con el flujo completo
-def capturar_fotos(id_usuario, ruta_carpeta_usuario, posiciones, etiqueta_posicion, etiqueta_conteo, ventana_principal, callback):
-    fotos_tomadas = []
-    codificaciones = []
-    contador_posicion = 0
-    contador_segundos = TIEMPO_ESPERA  # Contador para los segundos de espera
-
-    def capturar_foto():
-        nonlocal contador_posicion, contador_segundos
-
-        if contador_posicion >= len(posiciones):
-            etiqueta_posicion.config(text="Captura de fotos completada.", fg="green")
-            etiqueta_conteo.config(text="")
-            callback(fotos_tomadas, codificaciones)  # Llamar al callback cuando se completen todas las fotos
-            return
-
-        # Mostrar posición actual
-        posicion = posiciones[contador_posicion]
-        etiqueta_posicion.config(text=f"Coloque su rostro en la posición: {posicion}", fg="blue")
-        ventana_principal.update_idletasks()
-
-        # Actualizar el conteo regresivo
-        etiqueta_conteo.config(text=f"Tiempo restante: {contador_segundos} segundos", fg="orange")
-        if contador_segundos > 0:
-            contador_segundos -= 1
-            ventana_principal.after(1000, capturar_foto)
+        if len(ubicaciones_rostros) == 0:
+            etiqueta_posicion.config(text="No se detectó ningún rostro. Intente de nuevo.", fg="red")
+        elif len(ubicaciones_rostros) > 1:
+            etiqueta_posicion.config(text="Se detectaron múltiples rostros. Asegúrese de estar solo en el cuadro.", fg="red")
         else:
-            # Capturar la foto
-            ret, frame = config.captura.read()
-            if not ret:
-                etiqueta_posicion.config(text="Error: No se pudo leer el frame de la cámara", fg='red')
-                ventana_principal.after(1000, capturar_foto)  # Reintentar la captura
-                return
+            etiqueta_posicion.config(text="Rostro detectado correctamente.", fg="green")
+        
+        return ubicaciones_rostros
+    except Exception as e:
+        if etiqueta_posicion.winfo_exists():
+            etiqueta_posicion.config(text=f"Error al detectar rostros: {e}", fg="red")
+        print(f"[Debug] Error en verificar_rostros: {e}")
+        return []
 
-            # Procesar el frame y verificar rostros
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            ubicaciones_rostros = face_recognition.face_locations(frame_rgb)
-
-            if len(ubicaciones_rostros) != 1:
-                etiqueta_posicion.config(text="Error: Debe haber exactamente un rostro visible", fg='red')
-                ventana_principal.after(2000, capturar_foto)
-                return
-
-            # Guardar la imagen
-            fecha_hora_actual = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            nombre_archivo = f"{id_usuario}_{fecha_hora_actual}_{posicion}.jpg"
-            ruta_archivo = os.path.join(ruta_carpeta_usuario, nombre_archivo)
-
-            try:
-                cv2.imwrite(ruta_archivo, frame)
-                fotos_tomadas.append(ruta_archivo)
-
-                # Codificar el rostro
-                codificacion = face_recognition.face_encodings(frame_rgb, ubicaciones_rostros)[0]
-                codificaciones.append(codificacion)
-
-                etiqueta_posicion.config(text=f"Foto {posicion} guardada exitosamente", fg="green")
-                contador_posicion += 1  # Pasar a la siguiente posición
-                contador_segundos = TIEMPO_ESPERA
-                ventana_principal.after(2000, capturar_foto)
-            except Exception as e:
-                etiqueta_posicion.config(text=f"Error: no se pudo guardar la foto: {e}", fg='red')
-                ventana_principal.after(2000, capturar_foto)
-
-    capturar_foto()
-
-
-# Función para capturar foto con lentes con conteo regresivo
-def capturar_foto_con_lentes(id_usuario, ruta_carpeta_usuario, etiqueta_posicion, etiqueta_conteo, ventana_principal, callback):
-    etiqueta_posicion.config(text="Coloque sus lentes y mire a la cámara", fg="blue")
-    ventana_principal.update_idletasks()
-
-    contador_segundos = TIEMPO_ESPERA  # Contador de 6 segundos
+# Función genérica para manejar la captura de una foto
+def capturar_y_procesar_foto(ruta_carpeta_usuario, id_usuario, posicion, etiqueta_posicion, etiqueta_conteo, ventana_principal, callback, boton_capturar, boton_reiniciar, tiempo_espera=TIEMPO_ESPERA):
+    contador_segundos = tiempo_espera
+    captura_activa = True #Variable para controlar si la captura está activa
 
     def realizar_conteo():
-        nonlocal contador_segundos
+        nonlocal contador_segundos, captura_activa
+
+        if not captura_activa:
+            etiqueta_conteo.config(text="")
+            return
+
+        etiqueta_posicion.config(text=f"Preparando captura para posición {posicion}", fg="blue")
+        ventana_principal.update_idletasks()
 
         if contador_segundos > 0:
             etiqueta_conteo.config(text=f"Tiempo restante: {contador_segundos} segundos", fg="orange")
             contador_segundos -= 1
             ventana_principal.after(1000, realizar_conteo)
         else:
-            # Capturar la foto
             ret, frame = config.captura.read()
             if not ret:
-                etiqueta_posicion.config(text="Error: No se pudo leer el frame de la cámara", fg='red')
+                etiqueta_posicion.config(text="Error: No se pudo leer el frame de la cámara", fg="red")
+                #Habilitar solo en caso de emergencia
+                boton_capturar.config(state=tk.NORMAL, text="Capturar")
                 return
 
-            # Verificar rostro
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            ubicaciones_rostros = face_recognition.face_locations(frame_rgb)
-
+            ubicaciones_rostros = verificar_rostros(frame, etiqueta_posicion)
             if len(ubicaciones_rostros) != 1:
-                etiqueta_posicion.config(text="Error: Debe haber exactamente un rostro visible", fg='red')
+                ventana_principal.after(2000, realizar_conteo)
                 return
 
-            # Guardar la imagen
-            fecha_hora_actual = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            nombre_archivo = f"{id_usuario}_{fecha_hora_actual}_con_lentes.jpg"
+            fecha_hora_actual = datetime.now().strftime("%Y%m%d_%H%M%S")
+            nombre_archivo = f"{id_usuario}_{posicion}_{fecha_hora_actual}.jpg"
             ruta_archivo = os.path.join(ruta_carpeta_usuario, nombre_archivo)
 
             try:
                 cv2.imwrite(ruta_archivo, frame)
-                foto_lentes = ruta_archivo
-
-                # Codificar rostro
+                etiqueta_posicion.config(text=f"Foto {posicion} guardada exitosamente.", fg="green")
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 codificacion = face_recognition.face_encodings(frame_rgb, ubicaciones_rostros)[0]
-                callback(foto_lentes, [codificacion])
+                ventana_principal.after(2000, lambda: callback(ruta_archivo, codificacion))
+                
             except Exception as e:
-                etiqueta_posicion.config(text=f"Error al guardar foto: {e}", fg="red")
+                etiqueta_posicion.config(text=f"Error al guardar la foto: {e}", fg="red")
+                boton_capturar.config(state=tk.NORMAL, text="Capturar")
+                
+    def reiniciar_captura():
+        nonlocal captura_activa
+        captura_activa = False
+        etiqueta_posicion.config(text="Captura de fotos cancelada. Presione capturar para iniciar de nuevo ", fg="blue")
+        etiqueta_conteo.config(text="")
+        boton_capturar.config(state=tk.NORMAL, text="Capturar")
+        realizar_conteo()
 
+
+    boton_reiniciar.config(command=reiniciar_captura)
     realizar_conteo()
 
+# Funciones auxiliares
+def capturar_fotos(id_usuario, ruta_carpeta_usuario, posiciones, etiqueta_posicion, etiqueta_conteo, ventana_principal, callback, boton_capturar, boton_reiniciar):
+    fotos_tomadas = []
+    codificaciones = []
 
-# Ventana modal para preguntar si usa lentes
-def preguntar_usa_lentes(ventana_principal, id_usuario, ruta_carpeta_usuario, fotos_tomadas, codificaciones, etiqueta_posicion, etiqueta_conteo, callback_lentes, callback_no_lentes):
-    modal = Toplevel(ventana_principal)
-    modal.title("¿Usa lentes?")
-    modal.geometry("400x200")
-    modal.grab_set()
+    def procesar_foto(ruta_archivo, codificacion):
+        fotos_tomadas.append(ruta_archivo)
+        codificaciones.append(codificacion)
 
-    Label(modal, text="¿Usa lentes?", font=("Arial", 14), pady=20).pack()
-    botones_frame = tk.Frame(modal)
+        if len(fotos_tomadas) < len(posiciones):
+            siguiente_posicion = posiciones[len(fotos_tomadas)]
+            capturar_y_procesar_foto(
+                ruta_carpeta_usuario,
+                id_usuario,
+                siguiente_posicion,
+                etiqueta_posicion,
+                etiqueta_conteo,
+                ventana_principal,
+                procesar_foto,
+                boton_capturar,
+                boton_reiniciar)
+        else:
+            etiqueta_posicion.config(text="Captura de fotos completada.", fg="green")
+            etiqueta_conteo.config(text="")
+            
+            # Llamar a la pregunta de si usa lentes
+            preguntar_usa_lentes(
+                ventana_principal,
+                id_usuario,
+                ruta_carpeta_usuario,
+                fotos_tomadas,
+                codificaciones,
+                etiqueta_posicion,
+                etiqueta_conteo,
+                callback_final,
+                boton_capturar,
+                boton_reiniciar)
+
+    def callback_final(fotos_tomadas, codificaciones_finales):
+        """Callback que se ejecuta al finalizar la captura de fotos incluyendo lentes."""
+        etiqueta_posicion.config(text="Proceso de captura finalizado.", fg="blue")
+        boton_capturar.config(state=tk.NORMAL, text="Capturar")
+        callback(fotos_tomadas, codificaciones_finales)
+        
+
+    capturar_y_procesar_foto(
+        ruta_carpeta_usuario,
+        id_usuario,
+        posiciones[0],
+        etiqueta_posicion,
+        etiqueta_conteo,
+        ventana_principal,
+        procesar_foto,
+        boton_capturar,
+        boton_reiniciar
+    )
+
+#Ventana modal para preguuntar si usa lentes
+def preguntar_usa_lentes(
+        ventana_principal,
+        id_usuario,
+        ruta_carpeta_usuario,
+        fotos_tomadas,
+        codificaciones,
+        etiqueta_posicion,
+        etiqueta_conteo,
+        callback,
+        boton_capturar,
+        boton_reiniciar
+    ):
+    
+    ventana_lentes = Toplevel(ventana_principal)
+    ventana_lentes.title("Uso de lentes")
+    ventana_lentes.geometry("400x200")
+    ventana_lentes.grab_set()
+
+    Label(ventana_lentes, text="¿Usa lentes?", font=("Arial", 14), pady=20).pack()
+    botones_frame = tk.Frame(ventana_lentes)
     botones_frame.pack(pady=20)
 
-    Button(botones_frame, text="Sí", command=lambda: [modal.destroy(), callback_lentes(id_usuario, ruta_carpeta_usuario, fotos_tomadas, codificaciones, etiqueta_posicion, etiqueta_conteo)], width=10, bg="green", fg="white").pack(side=tk.LEFT, padx=5)
-    Button(botones_frame, text="No", command=lambda: [modal.destroy(), callback_no_lentes(fotos_tomadas, codificaciones, etiqueta_posicion)], width=10, bg="red", fg="white").pack(side=tk.RIGHT, padx=5)
+    def capturar_con_lentes():
+        ventana_lentes.destroy()
+        capturar_y_procesar_foto(
+            ruta_carpeta_usuario,
+            id_usuario,
+            "con lentes",
+            etiqueta_posicion,
+            etiqueta_conteo,
+            ventana_principal,
+            lambda ruta, cod: callback(fotos_tomadas + [ruta], codificaciones + [cod]),
+            boton_capturar,
+            boton_reiniciar,
+        )
 
+    
+    def finalizar_sin_lentes():
+        ventana_lentes.destroy()
+        boton_capturar.config(state=tk.NORMAL, text="Capturar")
+        callback(fotos_tomadas, codificaciones)
 
-# Función principal para capturar fotos
-def capturar(id_usuario, ruta_carpeta_usuario, etiqueta_posicion, etiqueta_conteo, ventana_principal):
-    posiciones = ["frontal", "lateral izquierdo", "lateral derecho", "mirando arriba", "mirando abajo"]
+    Button(botones_frame, text="si", command=capturar_con_lentes, width=10, bg="green", fg="white").pack(side=tk.LEFT, padx=5)
+    Button(botones_frame, text="no", command=finalizar_sin_lentes, width=10, bg="red", fg="white").pack(side=tk.RIGHT, padx=5)
 
-    def procesar_resultado(fotos_tomadas, codificaciones):
-        if not fotos_tomadas or not codificaciones:
-            etiqueta_posicion.config(text="Error: No se pudieron capturar todas las fotos.", fg="red")
-            return
-
-        preguntar_usa_lentes(ventana_principal, id_usuario, ruta_carpeta_usuario, fotos_tomadas, codificaciones, etiqueta_posicion, etiqueta_conteo, guardar_lentes_wrapper, guardar_en_bd_wrapper)
-    #Esto hay que arreglo
-    def guardar_lentes_wrapper(fotos_tomadas, codificaciones, lentes_fotos, lentes_codificaciones, etiqueta_posicion, etiqueta_conteo):
-        fotos_tomadas.extend(lentes_fotos)
-        codificaciones.extend(lentes_codificaciones)
-        guardar_en_bd(fotos_tomadas, codificaciones, etiqueta_posicion)
-
-    def guardar_en_bd_wrapper(fotos_tomadas, codificaciones, etiqueta_posicion):
-        guardar_en_bd(fotos_tomadas, codificaciones, etiqueta_posicion)
-
-    capturar_fotos(id_usuario, ruta_carpeta_usuario, posiciones, etiqueta_posicion, etiqueta_conteo, ventana_principal, procesar_resultado)
-
-
-# Guardar en la base de datos
+# Guardar en base de datos
 def guardar_en_bd(fotos_tomadas, codificaciones, etiqueta_posicion):
     if codificaciones:
         promedio_codificacion = [
