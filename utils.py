@@ -1,3 +1,4 @@
+#utils.py
 import tkinter as tk
 import sqlite3
 from tkinter import messagebox
@@ -5,6 +6,9 @@ import pickle
 from gestion_super_admin.super_admin import acceder_funciones_super_admin
 import bcrypt
 import config #Importa el archivo config.py
+import cv2
+from PIL import Image, ImageTk
+import face_recognition
 
 # Constantes de super administrador
 SUPER_ADMIN_USUARIO = "admin"
@@ -193,9 +197,7 @@ def cerrar_sesion(estado_label, boton_perfil, login_logout_btn, ventana_principa
             actualizar_estado_sesion,
             acceder_funciones_super_admin
     )
-)
-    
-
+)   
 
 def actualizar_boton_login_logout(
         usuario_id, estado_label, boton_perfil, login_logout_btn, ventana_principal, actualizar_estado_sesion_callback):
@@ -211,34 +213,90 @@ def actualizar_boton_login_logout(
         )
 
 
-#Función para cargar codificaciones de rostros conocidas
-def cargar_rostros_conocidos():
-    """Carga todas las codificaciones de rostros y sus IDs desde la base de datos."""
-    codificaciones = []
-    ids = []
+#----------------------- FIN BD ---------------
+
+# Función para guardar la codificación de un rostro en la base de datos
+def guardar_codificacion_rostro(id_usuario, codificacion):
+    """Guarda o actualiza la codificación del rostro de un usuario en la base de datos."""
     try:
         conexion, cursor = conectar_bd_usuarios()
         if conexion is None:
-            return [], []
-        
-        #Consultar los rostros y sus IDs/nombres
-        consulta = "SELECT id, codificacion_rostro FROM usuarios WHERE codificacion_rostro IS NOT NULL"
-        cursor.execute(consulta)
-        resultados = cursor.fetchall()
+            return False
 
-        for fila in resultados:
-            id_usuario = fila[0]
-            codificacion_rostro = pickle.loads(fila[1]) # Convertir el BLOB de nuevo a la codificacion
-            codificaciones.append(codificacion_rostro)
-            ids.append(id_usuario) 
+        # Serializar la codificación para almacenarla como BLOB en la base de datos
+        codificacion_serializada = pickle.dumps(codificacion)
 
-        conexion.close()
-        return codificaciones, ids
+        # Actualizar o insertar la codificación en la tabla de usuarios
+        consulta = """
+            UPDATE usuarios
+            SET codificacion_rostro = ?
+            WHERE id = ?
+        """
+        cursor.execute(consulta, (codificacion_serializada, id_usuario))
+        conexion.commit()
+        print(f"[Debug] Codificación del rostro para el usuario {id_usuario} guardada exitosamente.")
+        return True
     except Exception as e:
-        print(f"Error al cargar los rostros desde la base de datos: {e}")
-        return [], []
+        print(f"[Debug] Error al guardar la codificación: {e}")
+        return False
+    finally:
+        if conexion:
+            conexion.close()
 
-#----------------------- FIN BD ---------------
+def verificar_rostros(frame, etiqueta_posicion):
+    """Verifica la cantidad de rostros detectados en un frame y actualiza la etiqueta."""
+    try:
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        ubicaciones_rostros = face_recognition.face_locations(frame_rgb)
 
-#print(f"Valor de usuario_logueado_id: {usuario_logueado_id}, varlor de usuario_logueado_nombre: {usuario_logueado_nombre}")
+        #Dibujar cuadro verdes alrededor de los rostros detectados
+        for (top, right, bottom, left) in ubicaciones_rostros:
+            cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
+
+
+        if len(ubicaciones_rostros) == 0:
+            etiqueta_posicion.config(text="No se detectó ningún rostro. Intente de nuevo.", fg="red")
+        elif len(ubicaciones_rostros) > 1:
+            etiqueta_posicion.config(text="Se detectaron múltiples rostros. Asegúrese de estar solo en el cuadro.", fg="red")
+        else:
+            etiqueta_posicion.config(text="Rostro detectado correctamente.", fg="green")
+        
+        return ubicaciones_rostros
+    except Exception as e:
+        if etiqueta_posicion.winfo_exists():
+            etiqueta_posicion.config(text=f"Error al detectar rostros: {e}", fg="red")
+        print(f"[Debug] Error en verificar_rostros: {e}")
+        return []
+
+
+
+def actualizar_frame(canvas, etiqueta_estado, verificar_rostros):
+    try:
+        ret, frame = config.captura.read()
+        if not ret:
+            if etiqueta_estado.winfo_exists():
+                etiqueta_estado.config(text="Error al leer el frame de la cámara.", fg="red")
+            return 
+        
+        #Verificar rostros  y dibujar cuadros verdes
+        if callable(verificar_rostros):
+            verificar_rostros(frame, etiqueta_estado)
+        else:
+            print("[Debug] verificar_rostros no es una función válida.")
+        
+        #Convertir el frame a RGB compatible con tkinter
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        imagen = Image.fromarray(frame_rgb)
+        config.imagen_tk = ImageTk.PhotoImage(image=imagen)
+
+        canvas.create_image(0, 0, anchor=tk.NW, image=config.imagen_tk)
+        canvas.image_tk = config.imagen_tk
+    except Exception as e:
+        if etiqueta_estado.winfo_exists():
+            etiqueta_estado.config(text=f"Error al actualizar el frame: {e}", fg="red")
+        print(f"[Debug] Error al actualizar el frame: {e}")
+    finally:
+        #Asegurar que el ciclo de actualización se detenga si ocurre un error crítico
+        if etiqueta_estado.winfo_exists():
+            canvas.after(10, lambda: actualizar_frame(canvas, etiqueta_estado, verificar_rostros))
 

@@ -1,11 +1,145 @@
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox, ttk, Entry, Button, Label
 import bcrypt
 import re  # Validación de correo electrónico
 from utils import conectar_bd_usuarios
 import datetime
 import sqlite3
 from utils import conectar_bd_usuarios, ejecutar_consulta_usuarios
+from PIL import Image, ImageTk #Para manejar las imagenes
+
+def actualizar_interfaz():
+    #limpiar la lista existente(si usas Treeview)
+
+    abrir_ventana_usuario.delete(0, tk.END)
+
+    #conectar a la bd
+    conexion, cursor = conectar_bd_usuarios()
+    cursor.execute("SELECT * FROM usuarios")
+    usuarios = cursor.fetchall()
+
+    #Insertar los usuarios actuales en el listbox 
+    for usuario in usuarios:
+        abrir_ventana_usuario.insert(tk.END, usuario)
+
+    conexion.close()
+
+# Función para conectar con la base de datos y obtener los datos de los usuarios
+def obtener_usuarios():
+    """Obtiene la lista de usuarios de la base de datos."""
+    try:
+        conexion, cursor = conectar_bd_usuarios()
+        cursor.execute("""
+            SELECT id,
+            nombre_usuario,
+            apellido_usuario,
+            foto,
+            ultima_asistencia,
+            FROM usuarios""")
+        usuarios = cursor.fetchall()
+        conexion.close()
+        return usuarios
+    except Exception as e:
+        print(f"No se pudo obtener la lista usuarios: {e}")
+        return []
+    
+#Función para abrir la ventana de detalles del usuario
+def abrir_ventana_usuario(usuario_id):
+    """Abre una ventana con los detalles de un usuario."""
+    ventana_usuario = tk.Toplevel()
+    ventana_usuario.title(f"Detalles del Usuario {usuario_id}")
+    ventana_usuario.geometry("400x400")
+
+    #Mostrar solo el nombre por ahora
+    tk.Label(ventana_usuario, text=f"Detalles del Usuario {usuario_id}", font=("Arial", 16)).pack(pady=20)
+    tk.Label(ventana_usuario, text=f"Aqui puedes agregar más información", font=("Arial", 12), fg="gray").pack(pady=10)
+    
+
+def eliminar_usuario(usuario_id):
+    """"Elimina un usuario dado su ID ."""
+    try:
+        #Confirmación inicial con un cuadro de dialogo
+        confirmar = messagebox.askyesno(
+            "Confirmar eliminación",
+            f"¿Está seguro de que desea eliminar el usuario {usuario_id}?"
+        )
+        print(f"[Debug] Confirmacion recibida {confirmar}")
+        if not confirmar:
+            print("[Debug] Eliminación cancelada")
+            return #El usuario cancelo la eliminación
+        
+        #Proceder con la eliminación si se cumple la confirmación
+        conexion, cursor = conectar_bd_usuarios()
+        cursor.execute("DELETE FROM usuarios WHERE id = ?", (usuario_id,))
+        conexion.commit()
+        
+        #Verificar si la eliminación fue exitosa
+        cursor.execute("SELECT * FROM usuaarios WHERE id = ?", (usuario_id)) 
+        if cursor.fetchone() is None:
+            print("Usuario eliminado correctamente")
+            #Solo actualizamos la interfaz si la eliminación fue exitosa
+            messagebox.showinfo("Éxito", f"Usuario {usuario_id} eliminado correctamente.")
+            actualizar_interfaz()
+
+        messagebox.showinfo("Éxito", f"Usuario {usuario_id} eliminado correctamente.")
+    except Exception as e:
+        messagebox.showerror("Error", f"No se pudo eliminar el usuario {usuario_id}: {e}")
+
+
+#Ventana para ver usuarios al dar clic en ellos
+def ventana_ver_usuarios(usuario_id):
+    root = tk.Tk()
+    root.title("Detalles Usuario")
+    root.geometry("800x600")
+
+    # Crear un Treeview para mostrar los datos en una tabla
+    columnas = ("#", "nombre_completo", "ultima_asistencia", "foto")
+    tree = ttk.Treeview(root, columns=columnas, show="headings")
+
+    tree.heading("#", text="ID")
+    tree.column("#", width=50, anchor="center")
+    
+    tree.heading("nombre_completo", text="Nombre Completo")
+    tree.column("nombre_completo", width=200, anchor="w")
+
+    tree.heading("ultima_asistencia", text="Última Asistencia")
+    tree.column("ultima_asistencia", width=150, anchor="center")
+
+    tree.heading("foto", text="Foto")
+    tree.column("foto", width=100, anchor="center")
+
+    tree.pack(fill="both", expand=True, padx=20, pady=20)
+
+    #Boton para registrar un nuevo usuario
+    btn_registrar = ttk.Button(root, text="Registrar Nuevo Usuario", command=registrar_nuevo_usuario, bg="green", fg="white")
+    btn_registrar.pack(pady=10)
+
+    #Cargo los usuarios en el Treeview
+    usuarios = obtener_usuarios()
+
+    for usuarios in usuarios:
+        usuario = usuario[0]
+        nombre_completo = f"{usuario[1]} {usuario[2]}"
+        ultima_asistencia = usuario[4] if usuario[4] else "Sin registro"
+
+        #Cargar la foto (miniatura) en el Treeview
+        try:
+            if usuario_id [3]: # Si existe una ruta de foto
+                imagen = Image.open(usuario[3])
+                imagen = imagen.resize((50, 50)) # Redimensionar la imagen
+                foto = ImageTk.PhotoImage(imagen)
+                tree.insert("", tk.END, values=(usuario_id, nombre_completo, ultima_asistencia, "foto disponible"))
+            else:
+                tree.insert("", tk.END, values=(usuario_id, nombre_completo, ultima_asistencia, "Sin foto"))
+        except Exception as e:
+            print(f"[Debug] Error al cargar la foto: {e}")
+            tree.insert("", tk.END, values=(usuario_id, nombre_completo, ultima_asistencia, "Error al cargar la foto"))
+
+
+    #Evento para abrir detalles del usuario al hacer clic en el 
+    def abrir_detalle_usuario(event):
+        pass
+
 
 #Validaiones para el registro de usuarios
 def validar_correo(correo):

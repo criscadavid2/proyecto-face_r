@@ -3,9 +3,9 @@ import numpy as np
 import face_recognition
 import threading
 from datetime import datetime
-from gestion_rostros.registros import cargar_rostros_conocidos
+#from utils import cargar_rostros_conocidos
 from gestion_asistencia.asistencia import registrar_asistencia
-from gestion_camaras.camaras import inicializar_camaras
+
 
 
 #Variables globales
@@ -13,14 +13,9 @@ capturando = False
 codificaciones_conocidas = []
 nombres_conocidos = []
 
-def cargar_datos_rostros():
-    """Carga las codificaciones y nombres de rostros conocidos."""
-    global codificaciones_conocidas, nombres_conocidos
-    codificaciones_conocidas, nombres_conocidos = cargar_rostros_conocidos()
-    
-    if not codificaciones_conocidas:
-        print("No se encontraron rostros conocidos en la BD.")
 
+#Función para procesar un frame
+def procesar_frame(frame, codificaciones_conocidas, nombres_conocidos):
 
 def iniciar_reconocimiento(indice_camara):
     """Inicia el reconocimiento facial en tiempo real."""
@@ -82,7 +77,7 @@ def iniciar_reconocimiento(indice_camara):
 def iniciar_hilo_reconocimiento(indice_camara):
 
     """Inicia el reconocimiento facial en un hilo separado"""
-    cargar_datos_rostros() #Cargar rostros conocidos antes de iniciar
+    #cargar_datos_rostros() #Cargar rostros conocidos antes de iniciar
     hilo = threading.Thread(target=iniciar_reconocimiento, args=(indice_camara,)) #Inicia el hilo
     hilo.start()
 

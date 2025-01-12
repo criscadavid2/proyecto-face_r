@@ -6,7 +6,7 @@ import tkinter as tk
 from tkinter import Toplevel, Button, Canvas, Label
 from PIL import Image, ImageTk
 import config
-from utils import guardar_codificacion_rostro
+from utils import guardar_codificacion_rostro, actualizar_frame
 
 TIEMPO_ESPERA = 6  # Tiempo total de cuenta regresiva (segundos)
 
@@ -34,25 +34,6 @@ class Camara:
         except Exception as e:
             print(f"[Debug] Error al liberar la cámara: {e}")
 
-def verificar_rostros(frame, etiqueta_posicion):
-    """Verifica la cantidad de rostros detectados en un frame y actualiza la etiqueta."""
-    try:
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        ubicaciones_rostros = face_recognition.face_locations(frame_rgb)
-
-        if len(ubicaciones_rostros) == 0:
-            etiqueta_posicion.config(text="No se detectó ningún rostro. Intente de nuevo.", fg="red")
-        elif len(ubicaciones_rostros) > 1:
-            etiqueta_posicion.config(text="Se detectaron múltiples rostros. Asegúrese de estar solo en el cuadro.", fg="red")
-        else:
-            etiqueta_posicion.config(text="Rostro detectado correctamente.", fg="green")
-        
-        return ubicaciones_rostros
-    except Exception as e:
-        if etiqueta_posicion.winfo_exists():
-            etiqueta_posicion.config(text=f"Error al detectar rostros: {e}", fg="red")
-        print(f"[Debug] Error en verificar_rostros: {e}")
-        return []
 
 # Función genérica para manejar la captura de una foto
 def capturar_y_procesar_foto(ruta_carpeta_usuario, id_usuario, posicion, etiqueta_posicion, etiqueta_conteo, ventana_principal, callback, boton_capturar, boton_reiniciar, tiempo_espera=TIEMPO_ESPERA):
@@ -81,6 +62,7 @@ def capturar_y_procesar_foto(ruta_carpeta_usuario, id_usuario, posicion, etiquet
                 boton_capturar.config(state=tk.NORMAL, text="Capturar")
                 return
 
+            from utils import verificar_rostros # Importar aquí para evitar import circular
             ubicaciones_rostros = verificar_rostros(frame, etiqueta_posicion)
             if len(ubicaciones_rostros) != 1:
                 ventana_principal.after(2000, realizar_conteo)
@@ -94,9 +76,10 @@ def capturar_y_procesar_foto(ruta_carpeta_usuario, id_usuario, posicion, etiquet
                 cv2.imwrite(ruta_archivo, frame)
                 etiqueta_posicion.config(text=f"Foto {posicion} guardada exitosamente.", fg="green")
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+               
                 codificacion = face_recognition.face_encodings(frame_rgb, ubicaciones_rostros)[0]
                 ventana_principal.after(2000, lambda: callback(ruta_archivo, codificacion))
-                
+                boton_capturar.config(state=tk.NORMAL, text="Capturar") #Habilitar al finalizar
             except Exception as e:
                 etiqueta_posicion.config(text=f"Error al guardar la foto: {e}", fg="red")
                 boton_capturar.config(state=tk.NORMAL, text="Capturar")

@@ -2,44 +2,29 @@ import sqlite3
 
 def crear_base_datos():
     # Conectar a la base de datos (se crea automáticamente si no existe)
-    conexion = sqlite3.connect("gestion_usuarios/usuarios.db")
+    conexion = sqlite3.connect("gestion_asistencia/asistencia_analisis.db")
     cursor = conexion.cursor()
 
-    # Crear la tabla de roles
+    # Crear la tabla de análisis de asistencias
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS roles (
+        CREATE TABLE IF NOT EXISTS analisis_asistencias (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nombre TEXT UNIQUE NOT NULL
+            usuario_id INTEGER NOT NULL,
+            ultima_asistencia DATETIME,
+            asistencia_consecutiva INTEGER DEFAULT 0,
+            dias_sin_llegar_tarde INTEGER DEFAULT 0,
+            llegadas_tarde INTEGER DEFAULT 0,
+            inasistencias INTEGER DEFAULT 0,
+            inasistencias_consecutivas INTEGER DEFAULT 0,
+            motivo_ausencia TEXT,
+            FOREIGN KEY (usuario_id) REFERENCES usuarios(ID)
         )
     """)
-
-    # Crear la tabla de usuarios
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS usuarios (
-            ID TEXT PRIMARY KEY,  -- Documento de identidad como ID único
-            nombre_usuario TEXT NOT NULL,
-            apellido_usuario TEXT NOT NULL,
-            contrasena_usuario TEXT NOT NULL,
-            correo_usuario TEXT UNIQUE,  -- Correo electrónico (opcional)
-            rol_id INTEGER NOT NULL,  -- Referencia a roles
-            fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            grupo_usuario TEXT,               -- Solo para estudiantes
-            ultimo_acceso TIMESTAMP,
-            numero_usuario INTEGER NOT NULL,  -- Contador de usuarios
-            codificacion_rostro BLOB,        -- Codificación facial del usuario en formato BLOB
-            FOREIGN KEY (rol_id) REFERENCES roles(id) ON DELETE CASCADE
-        )
-    """)
-
-    # Insertar roles predeterminados
-    roles = ["Administrador", "Profesor", "Estudiante"]
-    for rol in roles:
-        cursor.execute("INSERT OR IGNORE INTO roles (nombre) VALUES (?)", (rol,))
 
     # Guardar cambios y cerrar la conexión
     conexion.commit()
     conexion.close()
-    print("Base de datos creada con roles iniciales correctamente.")
+    print("Tabla de análisis de asistencias creada correctamente.")
 
 # Ejecutar la función para crear la base de datos
 if __name__ == "__main__":
